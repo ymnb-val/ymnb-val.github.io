@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>YAMINABE 定点検索エンジン</title>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://apis.google.com/js/api.js"></script>
+  <style>
+    body {
+      font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+      margin: 20px auto;
+      max-width: 600px;
+      color: #222;
+      background: #f9f9f9;
+    }
+
+    h1 {
+      font-weight: 600;
+      font-size: 1.5rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    button {
+      background-color: #007acc;
+      border: none;
+      padding: 10px 15px;
+      color: white;
+      font-weight: 600;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 1rem 0;
+      width: 100%;
+      max-width: 200px;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+      transition: background-color 0.2s ease;
+    }
+
+    button:hover {
+      background-color: #005ea3;
+    }
+
+    #status, #result {
+      text-align: center;
+      margin-top: 0.5rem;
+      margin-bottom: 1rem;
+      font-weight: 500;
+      color: #555;
+    }
+
+    #top-dropdowns, #agent-dropdown-container {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+
+    .dropdown {
+      position: relative;
+      flex: 1 1 150px;
+      max-width: 180px;
+    }
+
+    .dropdown-selected {
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 8px 12px;
+      cursor: pointer;
+      user-select: none;
+      font-weight: 500;
+      color: #222;
+    }
+
+    .dropdown-options {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      max-height: 150px;
+      overflow-y: auto;
+      z-index: 10;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    }
+
+    .dropdown-options div {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      color: #222;
+    }
+
+    .dropdown-options div:hover {
+      background: #e6f0ff;
+    }
+
+    #videos {
+      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 12px;
+    }
+
+    #videos iframe {
+      border-radius: 6px;
+      border: 1px solid #ddd;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Valorant 定点共有ツール（二段階エージェント選択）</h1>
+
+  <button onclick="login()">Googleログイン</button>
+  <p id="status">未ログイン</p>
+
+  <!-- 上段ドロップダウン -->
+  <div id="top-dropdowns"></div>
+
+  <!-- 下段エージェントドロップダウン -->
+  <div id="agent-dropdown-container"></div>
+
+  <button id="search-button" onclick="search()">検索</button>
+
+  <p id="result"></p>
+  <div id="videos"></div>
+
+  <script>
+    const CHANNEL_ID = 'UCtKIv1NO4xZMEqe9ESfn2qA';
+    const CLIENT_ID = '1036652484090-5pcett8ccam91f8p669iui71dr40tvk7.apps.googleusercontent.com';
+    const API_KEY = 'AIzaSyAppfK7wHG6EenDPEwmiW6H2d_zBSDD93g';
+    const SCOPES = 'https://www.googleapis.com/auth/youtube.readonly';
+
+    let accessToken = '';
+    let allVideos = [];
+
+    const agentsByRole = {
+      'デュエリスト': ['ジェット', 'フェニックス', 'レイズ', 'レイナ', 'ヨル', 'ネオン', 'ウェイレイ'],
+      'イニシエーター': ['ソーヴァ', 'スカイ', 'KAY/O', 'フェイド', 'ゲッコー', 'テホ'],
+      'センチネル': ['キルジョイ', 'サイファー', 'チェンバー', 'セージ', 'ヴァイス', 'デッドロック'],
+      'コントローラー': ['ブリムストーン', 'オーメン', 'ヴァイパー', 'アストラ', 'ハーバー']
+    };
+
+    const maps = ['アセント', 'スプリット', 'ヘイヴン', 'バインド', 'アイスボックス', 'ブリーズ', 'フラクチャー', 'パール', 'ロータス', 'サンセット', 'アビス', 'カロード'];
+    const spots = ['A攻め', 'A守り', 'B攻め', 'B守り', 'C攻め', 'C守り', 'Mid攻め', 'Mid守り'];
+
+    const selections = { role: '', agent: '', map: '', spot: '' };
+
+    function createDropdown(id, options, parentId) {
+      const container = document.createElement('div');
+      container.className = 'dropdown';
+
+      const selected = document.createElement('div');
+      selected.className = 'dropdown-selected';
+      selected.setAttribute('data-type', id);
+      selected.innerText = `${id}選択`;
+      selected.addEventListener('click', () => toggleDropdown(id));
+
+      const optionsDiv = document.createElement('div');
+      optionsDiv.className = 'dropdown-options';
+      optionsDiv.id = `${id}-options`;
+
+      options.forEach(option => {
+        const opt = document.createElement('div');
+        opt.innerText = option;
+        opt.onclick = () => selectOption(id, option);
+        optionsDiv.appendChild(opt);
+      });
+
+      container.appendChild(selected);
+      container.appendChild(optionsDiv);
+      document.getElementById(parentId).appendChild(container);
+    }
+
+    function selectOption(type, value) {
+      const dropdown = document.querySelector(`.dropdown-selected[data-type="${type}"]`);
+      if (!dropdown) {
+        console.error(`Dropdown not found for type: ${type}`);
+        return;
+      }
+      dropdown.innerText = value;
+      selections[type] = value;
+      document.getElementById(`${type}-options`).style.display = 'none';
+
+      if (type === 'role') {
+        updateAgentDropdown(value);
+      }
+    }
+
+    function toggleDropdown(type) {
+      const options = document.getElementById(`${type}-options`);
+      options.style.display = options.style.display === 'block' ? 'none' : 'block';
+    }
+
+    function updateAgentDropdown(role) {
+      const agentContainer = document.getElementById('agent-dropdown-container');
+      agentContainer.innerHTML = '';
+      selections.agent = '';
+
+      if (role && agentsByRole[role]) {
+        createDropdown('agent', agentsByRole[role], 'agent-dropdown-container');
+      }
+    }
+
+    function login() {
+      const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: (response) => {
+          if (response.access_token) {
+            accessToken = response.access_token;
+            document.getElementById('status').innerText = '✅ ログイン成功';
+            loadVideos();
+          } else {
+            document.getElementById('status').innerText = '❌ ログイン失敗';
+          }
+        },
+      });
+
+      tokenClient.requestAccessToken();
+    }
+
+    async function loadVideos(pageToken = '') {
+      gapi.load('client', async () => {
+        await gapi.client.init({
+          apiKey: API_KEY,
+          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'],
+        });
+
+        gapi.client.setToken({ access_token: accessToken });
+
+        const response = await gapi.client.youtube.search.list({
+          part: 'snippet',
+          channelId: CHANNEL_ID,
+          maxResults: 50,
+          pageToken: pageToken,
+          type: 'video',
+          order: 'date',
+        });
+
+        allVideos = allVideos.concat(response.result.items);
+
+        if (response.result.nextPageToken) {
+          await loadVideos(response.result.nextPageToken);
+        } else {
+          document.getElementById('status').innerText = `✅ ${allVideos.length}件の動画を取得しました`;
+          displayVideos(allVideos);
+        }
+      });
+    }
+
+    function displayVideos(videos) {
+      const html = videos.map(item => {
+        if (!item.id || !item.id.videoId) return '';
+
+        const videoId = item.id.videoId;
+        const title = item.snippet.title;
+        return `<div><p>${title}</p><iframe src="https://www.youtube.com/embed/${videoId}" frameborder="0" allowfullscreen></iframe></div>`;
+      }).join('');
+
+      document.getElementById('videos').innerHTML = html;
+    }
+
+    function search() {
+      const { agent, map, spot } = selections;
+      const query = `${agent} ${map} ${spot}`.toLowerCase().trim();
+      document.getElementById('result').innerText = `🔍 検索条件: ${query}`;
+
+      const filtered = allVideos.filter(v => {
+        const title = v.snippet.title.toLowerCase();
+        return title.includes(agent.toLowerCase()) && title.includes(map.toLowerCase()) && title.includes(spot.toLowerCase());
+      });
+
+      displayVideos(filtered);
+    }
+
+    // 初期化
+    createDropdown('role', Object.keys(agentsByRole), 'top-dropdowns');
+    createDropdown('map', maps, 'top-dropdowns');
+    createDropdown('spot', spots, 'top-dropdowns');
+  </script>
+
+</body>
+
+</html>
